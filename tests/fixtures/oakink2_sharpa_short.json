@@ -1,0 +1,22 @@
+{
+  "task": "oakbi_879_rearrange",
+  "embodiment": "bimanual",
+  "data_type": "mjwp",
+  "sim_dt": 0.005,
+  "ref_dt": 0.02,
+  "alignment": "executed[s] compared to interpolated reference[s+1]",
+  "metrics": {
+    "obj_pos_err": 0.0034488369907519434,
+    "obj_quat_err": 0.00549654153265614,
+    "pos_err_right": 0.0034488369907519434,
+    "pos_err_left": 0.0,
+    "quat_err_right": 0.00549654153265614,
+    "quat_err_left": 0.0,
+    "success": true
+  },
+  "source_result": "outputs/start_grasp_test_20261019/runs/oakbi_879_rearrange/C_jointstart/attempt_01/run/oakink_sharpa_bimanual_bimanual_oakbi_879_rearrange_0_seed0.json",
+  "source_reference": "/n/netscratch/hankyang_lab/Lab/tongw/datasets/oakinkv2_spider/processed/oakink/sharpa_bimanual/bimanual/oakbi_879_rearrange/0/trajectory_kinematic.npz",
+  "source_trajectory_sha256": "7ae46eccc8debdd6af6563c300ac2ee332b545650e507a2cdfbc225de5534154",
+  "source_reference_sha256": "13ba101220f3900da78e9b40d7cf2f7abb8839b8e0315df4167cf60c3f63029e",
+  "metric_source_sha256": "9bb837fad227ca8692f5c6aed0650177e59021fe597abf1f0bde366fb372a1d4"
+}
