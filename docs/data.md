@@ -40,6 +40,8 @@ data/oakink2/processed/oakink/sharpa_bimanual/bimanual/oakbi_443_take_outside/
 
 Run physics optimization with the [README command](../README.md#run-grasp-mpc).
 
+**Object quaternion smoothing.** IK smooths the reference with a three-frame moving average. A quaternion `q` and its negation `-q` describe the same rotation, so this repository aligns the signs of each object quaternion along time before averaging and renormalizes afterwards; averaging across a sign change without this step gives a different orientation in the frames around it. [`experiments/oakink2_references.csv`](../experiments/oakink2_references.csv) lists, for every paper task, whether its reference was produced with this alignment (`sign_aligned`, 70 tasks) or by averaging the quaternion components directly (`unaligned`, 1,282 tasks).
+
 ### Exporting a pickle from original OakInk2 data
 
 If starting from the original release, [`oakink2_maniptrans.py`](../grasp/pipeline/oakink2_maniptrans.py) uses the loaders in an external [ManipTrans checkout](https://github.com/ManipTrans/ManipTrans). Set up its OakInk2 data under `<maniptrans-root>/data/OakInk-v2`, then supply the source clip's ManipTrans data index:

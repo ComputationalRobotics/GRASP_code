@@ -53,7 +53,6 @@ def load_data(
     if "ctrl" in raw_data:
         ctrl_ref = raw_data["ctrl"]
     else:
-        # TODO: disable automatic reference control generation, instead, move it to preprocess
         # Fallback if 'ctrl' is not in the data file
         loguru.logger.warning(
             "ctrl data not found, using 'qpos' as a initial guess for control."

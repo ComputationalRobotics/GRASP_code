@@ -35,10 +35,9 @@ pipeline = [
   # the PyPI release (0.71) imports names removed from numpy; this commit does not
   "chumpy @ git+https://github.com/mattloper/chumpy.git@580566eafc9ac68b2614b64d6f7aaa84eebb70da",
 ]
-# benchmarks/: plotting and the gradient (optax) branch of the tempered-SMC baseline
+# benchmarks/: plotting
 benchmarks = [
   "matplotlib==3.11.1",
-  "optax==0.2.8",
 ]
 dev = ["pytest", "ruff"]
 

@@ -99,8 +99,6 @@ def _compile_step(
     return capture.graph
 
 
-# TODO: define update environment parameter kernel functions, combine them compile step, also add parameter to be modified into MJWPEnv
-
 # --
 # Key functions
 # --
@@ -266,9 +264,7 @@ def _weight_diff_qpos(config: Config) -> torch.Tensor:
 def _diff_qpos(
     config: Config, qpos_sim: torch.Tensor, qpos_ref: torch.Tensor
 ) -> torch.Tensor:
-    """Compute the difference between qpos_sim and qpos_ref
-    TODO: replace with mujoco built-in function, not sure how to call warp internal function yet.
-    """
+    """Compute the difference between qpos_sim and qpos_ref."""
     batch_size = qpos_sim.shape[0]
     qpos_diff = torch.zeros((batch_size, config.nv), device=config.device)
     if config.embodiment_type == "bimanual":
@@ -676,8 +672,6 @@ def get_reward(
     """Non-terminal step reward for MJWP batched worlds.
     ref is a tuple: (qpos_ref, qvel_ref, ctrl_ref, contact_ref, contact_pos_ref)
     Returns (N,)
-
-    TODO: move reward computation to task-specific module
     """
     qpos_ref, qvel_ref, ctrl_ref, contact_ref, contact_pos_ref = ref
     qpos_sim = wp.to_torch(env.data_wp.qpos)
@@ -1039,9 +1033,8 @@ def step_env(config: Config, env: MJWPEnv, ctrl_mujoco: torch.Tensor):
 def save_env_params(config: Config, env: MJWPEnv):
     """Save the current simulation parameters."""
     # Only record which group is active; parameters are embedded in separate models
-    # TODO: explicitly read pair_margin and xy_offset from env.data_wp
-    # currently we choose this solution since pair_margin has a huge virtual dimension,
-    # convert it to torch would lead to OOM
+    # pair_margin and xy_offset are not read back from env.data_wp: pair_margin has a huge virtual dimension and
+    # converting it to torch would run out of memory
     pair_margin = 0.0
     xy_offset = 0.0
     return {"pair_margin": pair_margin, "xy_offset": xy_offset}
@@ -1078,7 +1071,6 @@ def load_env_params(config: Config, env: MJWPEnv, env_param: dict):
     # update object position (NOTE: currently, xy_offset is only one scalar, which means we only update in the diagonal direction)
     if "xy_offset" in env_param:
         qpos_override_th = wp.to_torch(env.data_wp.qpos)
-        # TODO: make object pos detection automatic
         if config.embodiment_type == "bimanual":
             qpos_override_th[:, -14:-12] = (
                 qpos_override_th[:, -14:-12] + env_param["xy_offset"]
@@ -1521,8 +1513,6 @@ def copy_sample_state(
 
 def _copy_state(src: mjwarp.Data, dst: mjwarp.Data):
     """Copy the state from src to dst
-
-    TODO: this function is a temporary solution for domain randomization. A better way should be defining a new warp kernel to update simulation parameter accordingly.
 
     Args:
         src: mjwarp.Data

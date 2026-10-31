@@ -41,8 +41,6 @@ from scipy.spatial.transform import Rotation as R
 from grasp import ROOT
 from grasp.utils.io import get_mesh_dir, get_processed_data_dir
 
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
 
 class CPUUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
@@ -390,4 +388,5 @@ def main(
 
 
 if __name__ == "__main__":
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""  # CPU only; set here so importing the module leaves the GPU visible
     tyro.cli(main)

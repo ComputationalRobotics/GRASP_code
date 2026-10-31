@@ -22,6 +22,8 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from grasp.pipeline.generate_xml import SUPPORT_PLATE_FLOOR_ONLY_TASKS, _support_plates_floor_only
+
 
 def swap_robot(source_scene: Path, robot_dir: Path, robot_type: str, dest: Path) -> mujoco.MjModel:
     source_scene = source_scene.resolve()      # the scene's relative meshdir is relative to its real location
@@ -124,8 +126,15 @@ def main() -> None:
     processed = args.dataset_dir.resolve() / "processed/oakink"
     source = processed / args.source_robot / "bimanual" / args.task
     dest = processed / args.robot_type / "bimanual" / args.task
-    model = swap_robot(source / "scene.xml", args.robot_dir.resolve(), args.robot_type, dest)
+    # start from the source robot's scene before its own support-plate change, if it has one
+    before = source / "scene.xml.before_floor_only"
+    model = swap_robot(before if before.exists() else source / "scene.xml", args.robot_dir.resolve(), args.robot_type, dest)
     info = json.loads((source / "task_info.json").read_text())
+    if args.task in SUPPORT_PLATE_FLOOR_ONLY_TASKS.get(args.robot_type, ()):
+        xml = (dest / "scene.xml").read_text()
+        (dest / "scene.xml.before_floor_only").write_text(xml)
+        (dest / "scene.xml").write_text(_support_plates_floor_only(xml, model, info))
+        model = mujoco.MjModel.from_xml_path(str(dest / "scene.xml"))
     info.update(robot_type=args.robot_type, dataset_dir=str(args.dataset_dir.resolve()))
     (dest / "task_info.json").write_text(json.dumps(info, indent=2) + "\n")
     print(f"[{args.task}] {args.robot_type} scene {dest / 'scene.xml'}: nq {model.nq}, nv {model.nv}, nu {model.nu}",

@@ -105,6 +105,41 @@ def _add_object_xyzrpy_actuators(
         pass
     return ET.tostring(root, encoding="unicode")
 
+# OakInk2 clips, per robot, whose support plates touch only the floor.  In these unscrew scenes one object's support
+# plate starts 1.6-2.2 cm inside the other object; with plate-object and hand-plate pairs the paper's runs ended with
+# 0.5-2.8 m (Sharpa) and 2.1-238 m (XHand) object error, with plate-floor pairs only 1.8-6.4 cm.  The scene without
+# the change is kept as scene.xml.before_floor_only; grasp.pipeline.swap_robot starts from it.
+SUPPORT_PLATE_FLOOR_ONLY_TASKS = {
+    "sharpa_bimanual": ("oakbi_303_unscrew", "oakbi_645_unscrew", "oakbi_840_unscrew", "oakbi_1035_unscrew"),
+    "xhand": ("oakbi_136_unscrew", "oakbi_304_unscrew", "oakbi_532_unscrew", "oakbi_692_unscrew", "oakbi_1129_unscrew"),
+}
+
+
+def _support_plates_floor_only(xml_text: str, model: mujoco.MjModel, task_info: dict) -> str:
+    """Remove every explicit pair of a support plate except plate-floor.  A plate is the object's 8-vertex convex
+    piece whose 12 shortest vertex distances are its edges: 4 x plate_thickness and 8 x plate_size."""
+    edges = [task_info["plate_thickness"]] * 4 + [task_info["plate_size"]] * 8
+    plates = []
+    for gid in range(model.ngeom):
+        mid = int(model.geom_dataid[gid])
+        body = model.body(model.geom_bodyid[gid]).name
+        if body not in ("right_object", "left_object") or model.geom_type[gid] != mujoco.mjtGeom.mjGEOM_MESH:
+            continue
+        if int(model.mesh_vertnum[mid]) != 8:
+            continue
+        v = model.mesh_vert[model.mesh_vertadr[mid]:model.mesh_vertadr[mid] + 8].astype(np.float64)
+        dist = np.sort(np.linalg.norm(v[:, None] - v[None], axis=-1)[np.triu_indices(8, 1)])
+        if np.allclose(dist[:12], edges, atol=1e-5):
+            plates.append(model.geom(gid).name)
+    assert len(plates) == 2, plates
+    root = ET.fromstring(xml_text)
+    contact = root.find("contact")
+    for pair in list(contact.findall("pair")):
+        names = (pair.get("geom1"), pair.get("geom2"))
+        if any(n in plates for n in names) and "floor" not in names:
+            contact.remove(pair)
+    return ET.tostring(root, encoding="unicode")
+
 
 def main(
     dataset_dir: str = f"{ROOT}/../data",
@@ -830,6 +865,10 @@ def main(
     xml_file = mj_spec.to_xml()
     # Physical connections belong to the runtime scene, not the IK targets.
     xml_file = add_object_connections(xml_file, task_info, object_connection_config)
+    if task in SUPPORT_PLATE_FLOOR_ONLY_TASKS.get(robot_type, ()):
+        with open(f"{processed_dir}/../scene.xml.before_floor_only", "w") as f:
+            f.write(xml_file)
+        xml_file = _support_plates_floor_only(xml_file, mj_model, task_info)
     export_file_path = f"{processed_dir}/../scene.xml"
     if not act_scene:
         with open(export_file_path, "w") as f:

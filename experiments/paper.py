@@ -59,6 +59,14 @@ DATASETS = {
     "omomo": ("omomo", HUMANOID, "humanoid_object.yaml", 0.1, "unitree_g1", "humanoid_object", 0.000182, None, "down"),
 }
 
+# OakInk2 clips not run in the paper: the collision geometry of the drawer's two parts interpenetrates by about 3 cm in
+# the first frame, so the parts push each other apart at 7-8 m/s within 0.5 s even without the hands (the optimizer
+# could not start oakbi_426 from a finite population).
+EXCLUDED_TASKS = {
+    "oakbi_426_push_in_drawer": "drawer parts interpenetrate 3.1 cm at frame 0 (8.2 m/s within 0.5 s without hands)",
+    "oakbi_1006_push_in_drawer": "drawer parts interpenetrate 3.2 cm at frame 0 (7.7 m/s within 0.5 s without hands)",
+}
+
 
 def reference_horizon(task_dir: Path, data_id: int, knot_dt: float, sim_dt: float, config: Path,
                       rounding: str) -> float:
@@ -78,6 +86,8 @@ def reference_horizon(task_dir: Path, data_id: int, knot_dt: float, sim_dt: floa
 def build(dataset: str, task: str, robot: str | None = None, embodiment: str | None = None, data_id: int = 0,
           dataset_dir: Path = REPO / "data", horizon_rounding: str | None = None) -> list[str]:
     """``grasp.mpc.run`` arguments for one task."""
+    if task in EXCLUDED_TASKS:
+        raise SystemExit(f"{task} is not run in the paper: {EXCLUDED_TASKS[task]}")
     name, settings, config, knot_dt, default_robot, default_embodiment, tau, horizon, rounding = DATASETS[dataset]
     robot, embodiment = robot or default_robot, embodiment or default_embodiment
     rounding = horizon_rounding or rounding

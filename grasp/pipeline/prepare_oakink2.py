@@ -11,6 +11,7 @@ under ``<dataset_dir>/processed/oakink/assets/robots/<robot_type>``.  Output: ``
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import numpy as np
@@ -40,4 +41,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""  # CPU only, as grasp.pipeline.oakink
     main()

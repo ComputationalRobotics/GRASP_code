@@ -26,7 +26,7 @@ source .venv/bin/activate
 uv pip install -e ".[pipeline,benchmarks,dev]"
 ```
 
-Dependencies are specified in [`pyproject.toml`](pyproject.toml). `pipeline` installs data preparation and IK dependencies; `benchmarks` adds plotting and the gradient-based baseline; `dev` adds test tools.
+Dependencies are specified in [`pyproject.toml`](pyproject.toml). `pipeline` installs data preparation and IK dependencies; `benchmarks` adds plotting; `dev` adds test tools.
 
 Run the commands below from the repository root. For GRASP-MPC, keep JAX on CPU while MuJoCo Warp runs simulation on GPU:
 
@@ -103,6 +103,10 @@ Choose `--method tsmc_grad`, `rwm`, or `mppi` for the baselines. Results are wri
 | [`tests`](tests) | Optimizer, surrogate, and controller tests |
 
 Run the tests with `python -m pytest -q tests`.
+
+## License
+
+GRASP is released under the [MIT License](LICENSE). Third-party code and models keep their own licenses, listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Acknowledgments
 
