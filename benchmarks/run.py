@@ -39,6 +39,7 @@ NUM_PARTICLES = 100
 TARGET_ESS = 0.8
 MAX_STAGES = 200
 MOVES_PER_STAGE = 99           # rollout-only samplers: 3 moves x 33 rollouts, the zeroth-order MALA budget per stage
+PUSHER_SUCCESS = (0.10, 0.5)   # a pusher run is solved when its best final box pose is within 10 cm and 0.5 rad of the goal
 TASKS = {
     "acrobot": dict(
         horizon=200, beta=10.0, rho=0.9, sigma=2.0,
@@ -158,6 +159,7 @@ def run_seed(task: str, method: str, seed: int, args) -> tuple[dict, np.ndarray,
         W = system._W
         row.update(final_pos_err_m=float(np.hypot(xT[0] - W.goal_x, xT[1] - W.goal_y)),
                    final_theta_err_rad=float(abs((xT[2] - W.goal_theta + np.pi) % (2 * np.pi) - np.pi)))
+        row["success"] = row["final_pos_err_m"] < PUSHER_SUCCESS[0] and row["final_theta_err_rad"] < PUSHER_SUCCESS[1]
     return row, samples, costs
 
 
@@ -191,6 +193,9 @@ def main() -> None:
     bests = np.array([r["best"] for r in rows])
     summary = dict(task=args.task, method=args.method, seeds=len(rows), best_mean=float(bests.mean()),
                    best_std=float(bests.std()), seconds_mean=float(np.mean([r["seconds"] for r in rows])))
+    if args.task == "pusher":
+        summary["success"] = sum(r["final_pos_err_m"] < PUSHER_SUCCESS[0] and r["final_theta_err_rad"] < PUSHER_SUCCESS[1]
+                                 for r in rows)
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     print("[summary]", json.dumps(summary), flush=True)
 
