@@ -43,7 +43,7 @@ def render(folder: Path, out_dir: Path, label: str, font, big, seed: int | None 
     assert abs(J - z["costs"][i]) < 1e-3 * abs(z["costs"][i]), (J, z["costs"][i])
     U = system.clamp_control(jnp.asarray(z["samples"][i], jnp.float32).reshape(H, m))
     x0 = system.default_initial_state
-    X = np.concatenate([np.asarray(x0)[None], np.asarray(system.rollout(x0, U))])
+    X = np.asarray(system.rollout(x0, U))  # (H + 1, state): x0 followed by the H rolled-out states
 
     P, Wt = system._P, system._W
     r_ = 0.5 * np.hypot(P.box_w, P.box_h) + 2 * P.pusher_radius  # fit every box pose plus the pusher
