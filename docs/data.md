@@ -57,6 +57,8 @@ python -m grasp.pipeline.oakink2_maniptrans 'HASH_PREFIX@PRIMITIVE_INDEX' \
 
 Replace the index and task placeholders with the chosen clip. ManipTrans is needed for this export step. Starting from an exported pickle and meshes, scene preparation, IK, MPC, and evaluation use this repository and its declared Python dependencies.
 
+**Object association.** ManipTrans's loaders take each hand's first object in the primitive's `obj_list_rh` / `obj_list_lh`. OakInk2 leaves one or both lists empty for some primitives, which are the 70 `oakextra_*` tasks; the exporter fills an empty list before the loaders read it. An empty hand takes the other hand's second object, or its only object, in which case the processor keeps a single object in the right slot. When both lists are empty, the sequence must track exactly two objects (the `obj_list` of its annotation): the first goes to the right hand and the second to the left. Primitives with both lists non-empty are exported unchanged.
+
 ## OakInk2: XHand and Wuji
 
 Prepare the Sharpa source scene above first. The following commands keep its objects and build the selected hand scene from the bundled robot model.

@@ -8,6 +8,13 @@ the same squared nearest-neighbour distance in torch (it only feeds ``tips_dista
 The clip is loaded at OakInk2's 120 Hz and resampled to ``--target-fps`` with ``idx = linspace(0, n - 1, int(n / 120 *
 fps)).round()``; the object meshes are linked into ``<dataset_dir>/raw/oakink/meshes`` from ``--oakink2-root``.
 
+Object association: the loaders take each hand's first object in the primitive's ``obj_list_rh`` / ``obj_list_lh``, and
+OakInk2 leaves one or both lists empty for some primitives (the ``oakextra_*`` tasks).  An empty list is filled before
+the loaders read it (``fill_object_association``): an empty hand takes the other hand's second object, or its only one
+(the processor then keeps a single object, in the right slot); when both are empty, the sequence must track exactly two
+objects (``obj_list`` of its annotation), and the first goes to the right hand, the second to the left.  Primitives
+with both lists non-empty are loaded unchanged.
+
     python -m grasp.pipeline.oakink2_maniptrans DATA_IDX --task oakbi_000_cut --dataset-dir data/oakink2 \\
         --maniptrans-root ~/ManipTrans --oakink2-root ~/OakInk-v2 --target-fps 50 --max-seconds 20
 """
@@ -15,6 +22,7 @@ fps)).round()``; the object meshes are linked into ``<dataset_dir>/raw/oakink/me
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pickle
 import sys
@@ -37,8 +45,62 @@ class _ChamferDistance:
         return d1, d2, i1, i2
 
 
-def _import_loaders(root: Path):
-    """Import ManipTrans's OakInk2 loaders without its RL packages (isaacgym, bps_torch)."""
+def fill_object_association(entry: dict, sequence_objects: list) -> dict:
+    """Return the primitive's program entry with empty ``obj_list_rh`` / ``obj_list_lh`` filled (see module docstring)."""
+    right, left = entry.get("obj_list_rh") or [], entry.get("obj_list_lh") or []
+    if right and left:
+        return entry
+    entry = dict(entry)
+    if not right and not left:
+        if len(sequence_objects) != 2:
+            raise ValueError(f"both hands have no object and the sequence tracks {len(sequence_objects)} objects "
+                             f"({sequence_objects}); the association needs exactly two")
+        entry["obj_list_rh"], entry["obj_list_lh"] = [sequence_objects[0]], [sequence_objects[1]]
+    elif not right:
+        entry["obj_list_rh"] = [left[1] if len(left) > 1 else left[0]]
+    else:
+        entry["obj_list_lh"] = [right[1] if len(right) > 1 else right[0]]
+    return entry
+
+
+class _ProgramInfo:
+    """Stands in for ``json`` inside the loaders: their one ``json.load`` reads the clip's program file, and a file
+    registered in ``overrides`` (absolute path -> parsed program) is returned with its object association filled."""
+
+    def __init__(self):
+        self.overrides = {}
+
+    def load(self, fp, **kwargs):
+        program = json.load(fp, **kwargs)
+        return self.overrides.get(os.path.abspath(fp.name), program)
+
+    def __getattr__(self, name):
+        return getattr(json, name)
+
+
+def _register_association(dataset, data_idx: str, program_info: _ProgramInfo) -> None:
+    """Fill the object association of ``data_idx``'s primitive, read from the same files the loader reads."""
+    seq_hash, stage = data_idx.split("@")
+    anno_path = dataset.data_pathes[dataset.seq_hashes[seq_hash]]
+    program_path = os.path.abspath(os.path.join(dataset.data_dir, "program", "program_info",
+                                                f"{os.path.splitext(os.path.basename(anno_path))[0]}.json"))
+    with open(program_path) as f:
+        program = json.load(f)
+    key = list(program)[int(stage)]
+    entry = program[key]
+    if entry.get("obj_list_rh") and entry.get("obj_list_lh"):
+        return
+    with open(anno_path, "rb") as f:
+        sequence_objects = pickle.load(f)["obj_list"]
+    program[key] = fill_object_association(entry, sequence_objects)
+    program_info.overrides[program_path] = program
+    print(f"[association] {data_idx}: right {entry.get('obj_list_rh')} left {entry.get('obj_list_lh')} -> "
+          f"right {program[key]['obj_list_rh']} left {program[key]['obj_list_lh']}", flush=True)
+
+
+def _import_loaders(root: Path, program_info: _ProgramInfo):
+    """Import ManipTrans's OakInk2 loaders without its RL packages (isaacgym, bps_torch); their program-file reads go
+    through ``program_info``."""
     chamfer = types.ModuleType("chamfer_distance")
     chamfer.ChamferDistance = _ChamferDistance
     sys.modules["chamfer_distance"] = chamfer
@@ -54,6 +116,8 @@ def _import_loaders(root: Path):
                                        "maniptrans_envs.lib.envs.dexhands")
     from main.dataset.oakink2_dataset_dexhand_lh import OakInk2DatasetDexHandLH
     from main.dataset.oakink2_dataset_dexhand_rh import OakInk2DatasetDexHandRH
+    for side in ("rh", "lh"):
+        sys.modules[f"main.dataset.oakink2_dataset_dexhand_{side}"].json = program_info
     return DexHandFactory, OakInk2DatasetDexHandRH, OakInk2DatasetDexHandLH
 
 
@@ -79,13 +143,15 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     root = args.maniptrans_root.resolve()
     os.chdir(root)    # the loaders read data/OakInk-v2 relative to the ManipTrans checkout
-    factory, loader_rh, loader_lh = _import_loaders(root)
+    program_info = _ProgramInfo()
+    factory, loader_rh, loader_lh = _import_loaders(root, program_info)
 
     out = {"env_type": "bimanual", "data_idx": args.data_idx}
     for side, loader in (("right", loader_rh), ("left", loader_lh)):
         dataset = loader(data_dir="data/OakInk-v2", device=args.device,
                          mujoco2gym_transf=torch.eye(4, device=args.device),
                          dexhand=factory.create_hand(args.dexhand, side), skip=1)
+        _register_association(dataset, args.data_idx, program_info)
         d = dataset[args.data_idx]
         hand = {k: _to_cpu(d[k]) for k in ("obj_verts", "obj_trajectory", "wrist_pos", "wrist_rot", "tips_distance",
                                            "obj_velocity", "obj_angular_velocity", "wrist_velocity",
