@@ -16,7 +16,7 @@ data/oakink2/
 
 These are inputs, not files bundled with the repository. The mesh paths under `meshes/` must match the object paths recorded in the pickle after `align_ds/`.
 
-Copy the unmodified Sharpa model to the dataset's robot asset directory, then prepare the task:
+Copy the unmodified Sharpa model to the dataset's robot asset directory, then prepare the task. Preparation also needs the OakInk2 release (its `anno_preview/` MANO annotations) and the MANO model files (`models/MANO_RIGHT.pkl`, `models/MANO_LEFT.pkl` from [mano.is.tue.mpg.de](https://mano.is.tue.mpg.de)):
 
 ```bash
 mkdir -p data/oakink2/processed/oakink/assets/robots/sharpa_bimanual
@@ -26,21 +26,35 @@ cp -a grasp/assets/robots/sharpa/. \
 python -m grasp.pipeline.prepare_oakink2 \
   --task oakbi_443_take_outside \
   --dataset-dir data/oakink2 \
-  --robot-type sharpa_bimanual
+  --robot-type sharpa_bimanual \
+  --oakink2-root /path/to/OakInk-v2 \
+  --mano-dir /path/to/mano_v1_2
 ```
 
-This runs keypoint conversion, object decomposition, scene generation, and IK. The resulting task directory is:
+This runs, in order:
+
+1. **Keypoints** (`grasp.pipeline.oakink`): wrist, fingertip and object trajectories in the simulation frame.
+2. **Object collision hulls** (`grasp.pipeline.decompose_fast`, `method="coacd"`): parts of the object mesh thinner than 2 mm are thickened to 2 mm, CoACD splits the mesh into at most 32 convex hulls (concavity threshold 0.05), and every hull is expanded outward by 2 mm. A 3 × 3 cm, 1 cm thick support plate is added under the object's lowest point in the first frame.
+3. **Scene** (`grasp.pipeline.generate_xml`): the robot, the floor and both objects, with collision pairs between every hand geom and the floor and every object hull, and low-friction pairs between the two objects.
+4. **Kinematic reference** (`grasp.pipeline.ik_fast`).
+5. **Contact gates** (`grasp.pipeline.oakink2_contact_gates`): the MANO hand surface of the demonstration for every reference frame, from the OakInk2 annotation, and per object side whether the hand holds the object (some hand vertex within 10 cm of it, object not resting) or the object rests on the floor (lowest point within 1 cm of it). The MPC charges a world that does not reproduce the gated contact.
+
+The resulting task directory is:
 
 ```text
 data/oakink2/processed/oakink/sharpa_bimanual/bimanual/oakbi_443_take_outside/
 ├── scene.xml
 ├── task_info.json
-└── 0/trajectory_kinematic.npz
+└── 0/
+    ├── trajectory_kinematic.npz
+    └── contact_gates.npz
 ```
 
-Run physics optimization with the [README command](../README.md#run-grasp-mpc).
+The MANO vertices are cached in `processed/oakink/mano/bimanual/<task>/0/mano_verts.npz` and reused for other robots.
 
-**Object quaternion smoothing.** IK smooths the reference with a three-frame moving average. A quaternion `q` and its negation `-q` describe the same rotation, so this repository aligns the signs of each object quaternion along time before averaging and renormalizes afterwards; averaging across a sign change without this step gives a different orientation in the frames around it. [`experiments/oakink2_references.csv`](../experiments/oakink2_references.csv) lists, for every paper task, whether its reference was produced with this alignment (`sign_aligned`, 70 tasks) or by averaging the quaternion components directly (`unaligned`, 1,282 tasks).
+Run physics optimization with the [README command](../README.md#run-grasp-mpc). Scenes with many hulls can exceed MuJoCo Warp's default contact or constraint buffers; add `--capacity-retries 6` to `experiments/paper.py` to restart such a run with larger buffers automatically.
+
+**Object quaternion smoothing.** IK smooths the reference with a three-frame moving average. A quaternion `q` and its negation `-q` describe the same rotation, so this repository aligns the signs of each object quaternion along time before averaging and renormalizes afterwards; averaging across a sign change without this step gives a different orientation in the frames around it.
 
 ### Exporting a pickle from original OakInk2 data
 
@@ -99,6 +113,17 @@ main(output_root_dir=str(root), robot_type="xhand", task=task,
      end_idx=len(keypoints["qpos_wrist_right"]), ref_dt=0.02, sim_dt=0.005,
      smoothing=False, show_viewer=False, save_video=False)
 PY
+```
+
+Build the contact gates for the selected hand's reference (the Sharpa task's MANO vertices are reused):
+
+```bash
+python -m grasp.pipeline.oakink2_contact_gates \
+  --task oakbi_443_take_outside \
+  --dataset-dir data/oakink2 \
+  --robot-type xhand \
+  --oakink2-root /path/to/OakInk-v2 \
+  --mano-dir /path/to/mano_v1_2
 ```
 
 Run the prepared hand with `experiments/paper.py oakink2 --robot xhand` or `--robot wuji_topo`, specifying the task and dataset directory as in the README.

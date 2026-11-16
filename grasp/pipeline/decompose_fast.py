@@ -63,13 +63,16 @@ def main(
     plate_thickness: float = 0.01,
     check_stability: bool = False,
     stability_max_drift: float = 0.005,
+    method: str = "coacd",
 ) -> None:
-    logger.warning(
-        "decompose_fast uses voxel-cluster convex hulls and does NOT capture "
-        "concavities (handles, mug interiors). For non-convex objects with "
-        "handles (teapot, mug, cup, kettle), prefer grasp.pipeline.decompose "
-        "(CoACD-based) for better retargeting performance."
-    )
+    """Collision hulls of the task's objects plus the support plate.  ``method``: ``"coacd"`` (default; thicken, CoACD,
+    dilate: ``grasp.pipeline.decompose_coacd``) or ``"voxel"`` (voxel-cluster convex hulls)."""
+    if method not in ("coacd", "voxel"):
+        raise ValueError(f"method must be 'coacd' or 'voxel', got {method!r}")
+    if method == "voxel":
+        logger.warning(
+            "voxel-cluster convex hulls do NOT capture concavities (handles, mug interiors)."
+        )
     dataset_path = Path(dataset_dir)
 
     if embodiment_type == "right":
@@ -150,7 +153,12 @@ def main(
             str(input_file), force="mesh", process=False, skip_materials=True
         )
 
-        hulls = fast_voxel_convex_decomp_from_pointcloud(np.asarray(mesh.vertices))
+        if method == "coacd":
+            from grasp.pipeline import decompose_coacd
+
+            hulls = decompose_coacd.hulls(mesh)
+        else:
+            hulls = fast_voxel_convex_decomp_from_pointcloud(np.asarray(mesh.vertices))
         if not hulls:
             logger.warning("No convex parts generated for {}; skipping export.", hand)
             continue

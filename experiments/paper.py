@@ -1,4 +1,4 @@
-"""GRASP-MPC with the settings used in the paper, per dataset.
+"""GRASP-MPC with the standard settings, per dataset.
 
     python experiments/paper.py oakink2 --robot sharpa_bimanual --task oakbi_000_cut
     python experiments/paper.py oakink2 --robot xhand --task oakbi_000_cut
@@ -13,7 +13,11 @@ OakInk2 reference shorter than one 0.2 s knot uses 0.1 s knots.  ``--horizon-rou
 (the paper's OakInk2 runs of the full-length, missing-object and object-connection task sets rounded up).  Hand tasks
 use ``tau = 0.006 / horizon``; humanoid tasks use a fixed tau.  Arguments after ``--`` are passed to ``grasp.mpc.run``
 unchanged, e.g. ``-- --output-dir runs/x`` or ``-- --override nconmax_per_env=512`` for a scene whose contacts exceed
-the default buffer.
+the default buffer; ``--capacity-retries 6`` enlarges the buffers automatically after an overflow.
+
+OakInk2 runs use 1024 particles and add the hand-object contact terms (``grasp.objective.contact_terms``): penetration
+beyond 5 mm (weight 3000) and the reference-gated contact mismatch (weight 0.5, gates from the task's
+``contact_gates.npz``, see docs/data.md).
 """
 
 from __future__ import annotations
@@ -39,6 +43,12 @@ HAND = [
     "--mala-preconditioner", "prior_full", "--surrogate-rank", "2", "--step-size", "0.0026",
     "--adaptive-step-target", "0.05", "--adaptive-step-rate", "3", "--adaptive-step-min-scale", "0.1",
 ]
+# OakInk2 hands: the hand settings with 1024 particles plus the hand-object contact terms (penetration beyond 5 mm and
+# the reference-gated contact mismatch; the gates are the task's contact_gates.npz, see docs/data.md).
+OAKINK2 = [("1024" if a == "2000" else a) for a in HAND] + [
+    "--hand-penetration-penalty", "3000", "--penetration-margin", "0.005", "--contact-mismatch-penalty", "0.5",
+]
+assert OAKINK2.count("1024") == 1
 HUMANOID = [
     "--override", "num_dr=0", "--override", f"sim_dt={1 / 60}", "--override", "knot_dt=0.1",
     "--num-particles", "1000", "--window-knots", "8", "--commit-knots", "1",
@@ -52,7 +62,7 @@ HUMANOID = [
 # dataset: (dataset_name, settings, config, knot spacing, default robot, default embodiment,
 #           tau (None: 0.006 / horizon), horizon (None: the whole reference), rounding of the whole reference)
 DATASETS = {
-    "oakink2": ("oakink", HAND, "oakink.yaml", 0.2, "sharpa_bimanual", "bimanual", None, None, "down"),
+    "oakink2": ("oakink", OAKINK2, "oakink.yaml", 0.2, "sharpa_bimanual", "bimanual", None, None, "down"),
     "hot3d": ("hot3d", HAND, "oakink.yaml", 0.2, "sharpa", "bimanual", None, None, "up"),
     "amass": ("amass", HUMANOID, "humanoid.yaml", 0.1, "unitree_g1", "humanoid", 0.0000455, None, "down"),
     "lafan": ("lafan", HUMANOID, "humanoid.yaml", 0.1, "unitree_g1", "humanoid", 0.000182, 10.0, None),
@@ -97,7 +107,7 @@ def build(dataset: str, task: str, robot: str | None = None, embodiment: str | N
     sim_dt = float(next(a for a in args if a.startswith("sim_dt=")).split("=")[1])
     if horizon is None:
         horizon = reference_horizon(task_dir, data_id, knot_dt, sim_dt, config, rounding)
-        if horizon == 0 and settings is HAND:  # reference shorter than one 0.2 s knot
+        if horizon == 0 and (settings is HAND or settings is OAKINK2):  # reference shorter than one 0.2 s knot
             horizon = reference_horizon(task_dir, data_id, 0.1, sim_dt, config, rounding)
             args = [("knot_dt=0.1" if a == "knot_dt=0.2" else a) for a in args]
     assert horizon > 0, (task_dir, horizon)
@@ -124,12 +134,26 @@ def main() -> None:
     parser.add_argument("--dataset-dir", type=Path, default=REPO / "data")
     parser.add_argument("--horizon-rounding", choices=("down", "up"), help="rounding of the whole reference to knots")
     parser.add_argument("--print", action="store_true", help="print the command instead of running it")
+    parser.add_argument("--capacity-retries", type=int, default=0,
+                        help="run grasp.mpc.run in a subprocess and restart it with larger MuJoCo Warp buffers after a "
+                             "buffer overflow, up to this many attempts (grasp.mpc.capacity_retry); 0 = run in-process")
     args = parser.parse_args(argv)
     run_args = build(args.dataset, args.task, args.robot, args.embodiment, args.data_id, args.dataset_dir,
                      args.horizon_rounding) + passthrough
     if args.print:
         print(" ".join(["python", "-m", "grasp.mpc.run", *run_args]))
         return
+    if args.capacity_retries > 0:
+        from grasp.mpc import capacity_retry
+
+        worlds = int(run_args[len(run_args) - 1 - run_args[::-1].index("--num-particles") + 1])
+        overrides = {}
+        for i, a in enumerate(run_args[:-1]):
+            if a == "--override" and run_args[i + 1].split("=", 1)[0] in capacity_retry.LIMITS:
+                key, value = run_args[i + 1].split("=", 1)
+                overrides[key] = int(value)
+        raise SystemExit(capacity_retry.run([sys.executable, "-m", "grasp.mpc.run", *run_args], worlds, overrides,
+                                            max_attempts=args.capacity_retries))
     from grasp.mpc.run import main as run
 
     sys.argv = ["grasp.mpc.run", *run_args]

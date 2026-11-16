@@ -6,8 +6,8 @@ interacts with (at least 5 frames within 3 cm of the object surface): wrist, fin
 resampled to 50 Hz, with the object mesh.  Hand participation is estimated from proximity; it is not a HOT3D label.
 
 ``prepare`` turns each exported task into a scene (CoACD convex decomposition, MuJoCo scene with the Sharpa hand),
-a kinematic reference (Do As I Do IK, no smoothing) and, for objects resting away from the floor at an endpoint, a
-static support surface under them.
+a kinematic reference (``grasp.pipeline.solve_ik``, no smoothing) and, for objects resting away from the floor at an
+endpoint, a static support surface under them.
 
     python -m grasp.pipeline.hot3d export --split train_aria --clip clip-001849 --dataset-dir data/hot3d \\
         --mano-dir ~/mano_v1_2/models

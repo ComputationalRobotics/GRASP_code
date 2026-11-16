@@ -83,6 +83,18 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--pin-first-knot", action="store_true",
                         help="knot 0 of every window = the control offset executed just before it (in candidate rollouts and "
                              "in execution), so replans cannot jump the command")
+    parser.add_argument("--hand-penetration-penalty", type=float, default=0.0,
+                        help="subtract this x (deepest hand-object contact - penetration margin)_+^2 [m^2] from every step "
+                             "reward (grasp.objective.contact_terms); 0 = off")
+    parser.add_argument("--penetration-margin", type=float, default=0.005, help="penetration depth left free of charge [m]")
+    parser.add_argument("--contact-mismatch-penalty", type=float, default=0.0,
+                        help="with --hand-penetration-penalty: charge this per object side and step when the reference gate "
+                             "says in hand (resting on the floor) and the world has no hand (floor) contact on that object; "
+                             "0 = off")
+    parser.add_argument("--contact-gate-file", type=Path, default=None,
+                        help="gates for --contact-mismatch-penalty, one row per kinematic-reference row (default: "
+                             "contact_gates.npz beside the task's trajectory_kinematic.npz, from "
+                             "grasp.pipeline.oakink2_contact_gates)")
     parser.add_argument("--target-ess", type=float, default=0.9)
     parser.add_argument("--num-mcmc-steps", type=int, default=5)
     parser.add_argument("--step-size", type=float, default=3e-3)
@@ -221,6 +233,35 @@ def main() -> None:
     if N != N_worlds:
         raise ValueError("config.num_samples must equal num_particles")
 
+    evaluator_kwargs = dict(
+        config=config, env=env, mjwp=mjwp_module, ref_data=ref_data,
+        full_reference=full_reference, real_actuator_ids=real_ids,
+        env_params=env_params, steps_per_knot=n, total_steps=T,
+    )
+    evaluator = GraspWindowEvaluator(**evaluator_kwargs)
+
+    # Hand-object contact terms: part of every step reward, so the reference cost and the final re-evaluation use the
+    # evaluator's own full-horizon rollout instead of the tracking-only FullHorizonCost.
+    full_cost = full_horizon_cost
+    contact_summary = None
+    if float(args.hand_penetration_penalty) > 0:
+        from grasp.objective.contact_terms import ContactTerms, load_gates
+        gates = {}
+        if float(args.contact_mismatch_penalty) > 0:
+            gate_file = args.contact_gate_file or Path(config.data_path).parent / "contact_gates.npz"
+            with np.load(config.data_path) as source:
+                n_rows = len(source["qpos"])
+            gin, grest = load_gates(gate_file, n_rows, T, float(config.sim_dt), float(config.ref_dt), int(args.start_frame))
+            gates = dict(gate_inhand=gin, gate_rest=grest)
+            print(f"[contact-terms] gates from {gate_file}", flush=True)
+        evaluator.contact_terms = ContactTerms(
+            env, N_worlds, config.device, float(args.hand_penetration_penalty), float(args.penetration_margin),
+            float(args.contact_mismatch_penalty), **gates)
+        full_cost = evaluator.full_horizon_cost
+        contact_summary = evaluator.contact_terms.summary()
+        print(f"[contact-terms] {contact_summary}", flush=True)
+    elif float(args.contact_mismatch_penalty) > 0:
+        raise ValueError("--contact-mismatch-penalty needs --hand-penetration-penalty > 0")
 
     # Snapshot of the initial state for the final full-horizon re-evaluation.
     with wp.ScopedDevice(env.device):
@@ -233,7 +274,7 @@ def main() -> None:
     # Reference replica check without aborting on non-finite worlds: report
     # the distribution instead (some contact-rich references are not
     # reproducible across MJWarp worlds).
-    _ref_values = full_horizon_cost(
+    _ref_values = full_cost(
         torch.as_tensor(full_reference, dtype=torch.float32, device=config.device)
         .unsqueeze(0).repeat(N_worlds, 1, 1))
     _finite = np.isfinite(_ref_values)
@@ -252,12 +293,6 @@ def main() -> None:
         flush=True,
     )
 
-    evaluator_kwargs = dict(
-        config=config, env=env, mjwp=mjwp_module, ref_data=ref_data,
-        full_reference=full_reference, real_actuator_ids=real_ids,
-        env_params=env_params, steps_per_knot=n, total_steps=T,
-    )
-    evaluator = GraspWindowEvaluator(**evaluator_kwargs)
     evaluator.pin_first_knot = bool(args.pin_first_knot)
     if args.pin_first_knot:
         print("[pin-first-knot] knot 0 of each window pinned to the last executed control offset", flush=True)
@@ -351,7 +386,7 @@ def main() -> None:
     full_controls[:, real_ids] += torch.as_tensor(
         result["committed_steps"], dtype=torch.float32, device=config.device
     )
-    j_full = full_horizon_cost(full_controls.unsqueeze(0).repeat(N_worlds, 1, 1))
+    j_full = full_cost(full_controls.unsqueeze(0).repeat(N_worlds, 1, 1))
     committed = result["committed_cost_world"]
     mismatch0 = float(abs(j_full[0] - committed[0]))
     print(
@@ -434,6 +469,7 @@ def main() -> None:
         },
         "reference_J0": reference_cost,
         "tracking_metrics": tracking_metrics,
+        "contact_terms": contact_summary,
         "J_full_slot0": float(j_full[0]),
         "J_full_slots": {"min": float(j_full.min()), "median": float(np.median(j_full)), "max": float(j_full.max())},
         "committed_cost_slot0": float(committed[0]),

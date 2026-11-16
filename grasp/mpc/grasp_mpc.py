@@ -119,6 +119,9 @@ class GraspWindowEvaluator:
         # enable_joint_start(); cleared once the first window is committed.
         self.joint_start_pending = False
         self.joint_start_q = None            # (m,) chosen initial configuration of the actuated joints, after commit
+        # contact_terms: grasp.objective.contact_terms.ContactTerms; its per-step cost (hand-object penetration and
+        # contact mismatch) is subtracted from every step reward.  None = tracking reward only.
+        self.contact_terms = None
     def enable_joint_start(self, model_cpu):
         jid = [int(model_cpu.actuator_trnid[a, 0]) for a in self.real_ids]
         dev = self.config.device
@@ -180,7 +183,28 @@ class GraspWindowEvaluator:
             rew, _ = self.mjwp.get_terminal_reward(self.config, self.env, ref)
         else:
             rew, _ = self.mjwp.get_reward(self.config, self.env, ref)
+        if self.contact_terms is not None:
+            rew = rew - self.contact_terms(s).to(rew.dtype)
         return rew, ref
+
+    def full_horizon_cost(self, full_controls: torch.Tensor) -> np.ndarray:
+        """Cost of complete ``(N, T, nu)`` control sequences from the current state, with the same per-step reward as
+        the windows (contact terms included): ``-(sum of step rewards) / T``.  The state is restored."""
+        full_controls = torch.as_tensor(full_controls, dtype=torch.float32, device=self.config.device)
+        if tuple(full_controls.shape) != (self.N, self.T, int(self.config.nu)):
+            raise ValueError(f"full controls must have shape {(self.N, self.T, int(self.config.nu))}, "
+                             f"got {tuple(full_controls.shape)}")
+        self.mjwp.save_state(self.env)
+        init_param = self.mjwp.save_env_params(self.config, self.env)
+        self.mjwp.load_env_params(self.config, self.env, self.env_params)
+        cum = torch.zeros(self.N, device=self.config.device)
+        for s in range(self.T):
+            rew, _ = self._step_and_reward(full_controls[:, s], s)
+            cum += rew
+        self.mjwp.load_state(self.env, None)
+        self.mjwp.load_env_params(self.config, self.env, init_param)
+        self.sim_steps += self.N * self.T
+        return (-(cum / self.T)).detach().cpu().numpy().astype(np.float64)
 
     def rollout_window(self, knots: np.ndarray, k0: int):
         """Per-step rewards (N, L) and the terminal reward at the window end

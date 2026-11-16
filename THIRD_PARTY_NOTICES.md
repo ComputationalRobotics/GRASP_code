@@ -1,6 +1,6 @@
 # Third-party notices
 
-## Do As I Do: object tracking metrics
+## Do As I Do: object tracking metrics, IK, collision hulls and proximity masks
 
 `grasp/evaluation/tracking_error.py` is copied from Do As I Do
 (https://github.com/malik-group/do-as-i-do, commit `824591b808c342b20079c3b4198a8c2bdf88c74e`),
@@ -10,6 +10,13 @@
 commit (import paths and the processed-directory helper).
 
 Source SHA-256: `9bb837fad227ca8692f5c6aed0650177e59021fe597abf1f0bde366fb372a1d4`.
+
+`grasp/pipeline/decompose_coacd.py` copies `_local_thickness`, `thicken_mesh`, `coacd_convex_decomp` and `dilate_hulls`
+from `retargeting/retargeting/pipeline/decompose_mesh.py` of the same commit, unchanged.
+
+`grasp/pipeline/in_hand.py` copies `compute_in_hand_mask`, `compute_near_floor_mask`, `body_has_mesh_geom` and
+`extract_body_mesh_verts` from `retargeting/retargeting/utils/in_hand.py` and `quat_wxyz_to_rotmat` from
+`retargeting/retargeting/utils/mujoco_utils.py` of the same commit (one assertion message shortened).
 
 MIT License
 
